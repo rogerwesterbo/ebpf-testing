@@ -1,0 +1,96 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: Test and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm make bpftool libbpf-dev linux-headers-$(uname -r)
+
+      - name: Verify dependencies
+        run: make deps
+
+      - name: Run tests
+        run: make test
+
+      - name: Run linter
+        run: make lint
+
+      - name: Run security scan
+        run: make go-security-scan
+
+      - name: Build eBPF (x86)
+        run: make build-ebpf
+
+      - name: Build Go application
+        run: make build-agent
+
+  build-matrix:
+    name: Build Multi-Architecture
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            target_arch: x86
+            platform: linux/amd64
+          - arch: arm64
+            target_arch: arm64
+            platform: linux/arm64
+          - arch: arm
+            target_arch: arm
+            platform: linux/arm/v7
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm make bpftool libbpf-dev
+          case "${{ matrix.arch }}" in
+            "amd64") sudo apt-get install -y linux-headers-amd64 || true ;;
+            "arm64") sudo apt-get install -y linux-headers-arm64 || true ;;
+            "arm") sudo apt-get install -y linux-headers-armmp || true ;;
+          esac
+
+      - name: Build eBPF for ${{ matrix.arch }}
+        run: |
+          make build-ebpf-arch TARGET_ARCH=${{ matrix.target_arch }}
+
+      - name: Build Go agent for ${{ matrix.arch }}
+        run: |
+          make build-agent-arch GOARCH=${{ matrix.arch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: |
+            bin/agent-${{ matrix.arch }}
+            eBPF/tcpconnect.bpf.o

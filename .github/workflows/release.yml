@@ -1,0 +1,236 @@
+name: Release
+
+on:
+    release:
+        types: [published]
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+    HELM_REGISTRY: ghcr.io/rogerwesterbo/helm
+
+jobs:
+    build-and-push-image:
+        name: Build and Push Multi-Arch Container
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+        outputs:
+            image-digest: ${{ steps.build.outputs.digest }}
+            image-version: ${{ steps.meta.outputs.version }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata (tags, labels)
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=semver,pattern={{version}}
+                      type=semver,pattern={{major}}.{{minor}}
+                      type=semver,pattern={{major}}
+                      type=raw,value=latest
+
+            - name: Build and push Docker image
+              id: build
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  platforms: linux/amd64,linux/arm64,linux/arm/v7
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+    package-and-push-helm:
+        name: Package and Push Helm Chart
+        runs-on: ubuntu-latest
+        needs: build-and-push-image
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install Helm
+              uses: azure/setup-helm@v4
+              with:
+                  version: 'latest'
+
+            - name: Extract version from release tag
+              id: version
+              run: |
+                  # Remove 'v' prefix from tag if present
+                  VERSION=${GITHUB_REF#refs/tags/v}
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "chart_version=$VERSION" >> $GITHUB_OUTPUT
+
+            - name: Update Helm chart with release version and image digest
+              run: |
+                  # Update Chart.yaml version and appVersion
+                  sed -i "s/^version:.*/version: ${{ steps.version.outputs.chart_version }}/" charts/ebpf-testing/Chart.yaml
+                  sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" charts/ebpf-testing/Chart.yaml
+
+                  # Update values.yaml with the image digest
+                  sed -i "s|repository:.*|repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}|" charts/ebpf-testing/values.yaml
+                  sed -i "s/tag:.*/tag: \"${{ steps.version.outputs.version }}@${{ needs.build-and-push-image.outputs.image-digest }}\"/" charts/ebpf-testing/values.yaml
+
+                  # Show the changes
+                  echo "=== Updated Chart.yaml ==="
+                  cat charts/ebpf-testing/Chart.yaml
+                  echo "=== Updated values.yaml (image section) ==="
+                  grep -A 4 "^image:" charts/ebpf-testing/values.yaml
+
+            - name: Package Helm chart
+              run: |
+                  helm package charts/ebpf-testing -d .helm-package
+
+            - name: Log in to Helm Registry
+              run: |
+                  echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
+
+            - name: Push Helm chart to OCI registry
+              run: |
+                  helm push .helm-package/ebpf-testing-${{ steps.version.outputs.chart_version }}.tgz oci://${{ env.HELM_REGISTRY }}
+
+            - name: Upload Helm chart as release asset
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: .helm-package/ebpf-testing-${{ steps.version.outputs.chart_version }}.tgz
+
+    create-release-artifacts:
+        name: Create Release Binaries
+        runs-on: ubuntu-latest
+        needs: build-and-push-image
+        permissions:
+            contents: write
+        strategy:
+            matrix:
+                include:
+                    - arch: amd64
+                      target_arch: x86
+                      platform: linux/amd64
+                    - arch: arm64
+                      target_arch: arm64
+                      platform: linux/arm64
+                    - arch: arm
+                      target_arch: arm
+                      platform: linux/arm/v7
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: 'go.mod'
+
+            - name: Install build dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y clang llvm make bpftool libbpf-dev
+                  case "${{ matrix.arch }}" in
+                    "amd64") sudo apt-get install -y linux-headers-amd64 || true ;;
+                    "arm64") sudo apt-get install -y linux-headers-arm64 || true ;;
+                    "arm") sudo apt-get install -y linux-headers-armmp || true ;;
+                  esac
+
+            - name: Build eBPF for ${{ matrix.arch }}
+              run: |
+                  make build-ebpf-arch TARGET_ARCH=${{ matrix.target_arch }}
+                  mv eBPF/tcpconnect.bpf.o eBPF/tcpconnect.bpf.${{ matrix.arch }}.o
+
+            - name: Build Go agent for ${{ matrix.arch }}
+              run: |
+                  CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -o bin/agent-${{ matrix.arch }} ./cmd/agent
+
+            - name: Create release archive
+              run: |
+                  mkdir -p ebpf-tcp-monitor-${{ matrix.arch }}
+                  cp bin/agent-${{ matrix.arch }} ebpf-tcp-monitor-${{ matrix.arch }}/agent
+                  cp eBPF/tcpconnect.bpf.${{ matrix.arch }}.o ebpf-tcp-monitor-${{ matrix.arch }}/tcpconnect.bpf.o
+                  cp README.md LICENSE ebpf-tcp-monitor-${{ matrix.arch }}/
+                  tar -czf ebpf-tcp-monitor-${{ matrix.arch }}.tar.gz ebpf-tcp-monitor-${{ matrix.arch }}
+
+            - name: Upload release archive
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: ebpf-tcp-monitor-${{ matrix.arch }}.tar.gz
+
+    update-release-notes:
+        name: Update Release Notes
+        runs-on: ubuntu-latest
+        needs:
+            [
+                build-and-push-image,
+                package-and-push-helm,
+                create-release-artifacts,
+            ]
+        permissions:
+            contents: write
+        steps:
+            - name: Update release with installation instructions
+              uses: softprops/action-gh-release@v2
+              with:
+                  append_body: true
+                  body: |
+
+                      ## 📦 Installation
+
+                      ### Using Helm (Recommended)
+
+                      ```bash
+                      # Add the Helm repository
+                      helm pull oci://${{ env.HELM_REGISTRY }}/ebpf-testing --version ${{ needs.build-and-push-image.outputs.image-version }}
+
+                      # Install the chart
+                      helm install ebpf-testing oci://${{ env.HELM_REGISTRY }}/ebpf-testing --version ${{ needs.build-and-push-image.outputs.image-version }}
+                      ```
+
+                      ### Using Docker
+
+                      ```bash
+                      # Pull the image
+                      docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push-image.outputs.image-version }}
+
+                      # Run the container
+                      docker run --rm --privileged --pid=host \
+                        -p 9090:9090 -p 8080:8080 \
+                        ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push-image.outputs.image-version }}
+                      ```
+
+                      ### Using Binary
+
+                      Download the appropriate binary for your architecture from the assets above and extract:
+
+                      ```bash
+                      tar -xzf ebpf-tcp-monitor-<arch>.tar.gz
+                      cd ebpf-tcp-monitor-<arch>
+                      sudo ./agent
+                      ```
+
+                      ## 🔐 Image Details
+
+                      - **Image**: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push-image.outputs.image-version }}`
+                      - **Digest**: `${{ needs.build-and-push-image.outputs.image-digest }}`
+                      - **Platforms**: linux/amd64, linux/arm64, linux/arm/v7
+
+                      ## 📊 Helm Chart
+
+                      - **Chart**: `oci://${{ env.HELM_REGISTRY }}/ebpf-testing`
+                      - **Version**: `${{ needs.build-and-push-image.outputs.image-version }}`

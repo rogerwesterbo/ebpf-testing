@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ebpf-testing.fullname" . }}
+  labels:
+    {{- include "ebpf-testing.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- range .Values.service.ports }}
+    - port: {{ .port }}
+      targetPort: {{ .targetPort }}
+      protocol: {{ .protocol }}
+      name: {{ .name }}
+    {{- end }}
+  selector:
+    {{- include "ebpf-testing.selectorLabels" . | nindent 4 }}

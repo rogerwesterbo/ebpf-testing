@@ -1,0 +1,77 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-ebpf",
+            "type": "shell",
+            "command": "make",
+            "args": ["-C", "eBPF"],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "port-forward-delve",
+            "type": "shell",
+            "command": "kubectl",
+            "args": [
+                "port-forward",
+                "$(kubectl get pods -l app.kubernetes.io/name=ebpf-testing -o jsonpath='{.items[0].metadata.name}')",
+                "2345:2345"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^Forwarding from"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^Forwarding from",
+                    "endsPattern": "^Forwarding from"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "docker-build-debug",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "build",
+                "-f",
+                "Dockerfile.debug",
+                "-t",
+                "ebpf-testing:debug",
+                "."
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "deploy-debug-pod",
+            "type": "shell",
+            "command": "kubectl",
+            "args": [
+                "apply",
+                "-f",
+                "k8s/debug-deployment.yaml"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "delete-debug-pod",
+            "type": "shell",
+            "command": "kubectl",
+            "args": [
+                "delete",
+                "-f",
+                "k8s/debug-deployment.yaml"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

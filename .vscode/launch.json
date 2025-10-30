@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Local (requires root)",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/agent",
+      "console": "integratedTerminal",
+      "asRoot": true,
+      "env": {
+        "GOOS": "linux"
+      },
+      "preLaunchTask": "build-ebpf"
+    },
+    {
+      "name": "Attach to Kubernetes Pod",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "remotePath": "/",
+      "port": 2345,
+      "host": "localhost",
+      "showLog": true,
+      "trace": "verbose",
+      "preLaunchTask": "port-forward-delve"
+    },
+    {
+      "name": "Debug in Docker",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/agent",
+      "preLaunchTask": "docker-build-debug",
+      "console": "integratedTerminal"
+    }
+  ]
+}

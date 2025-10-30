@@ -1,0 +1,53 @@
+# Debug Dockerfile with Delve debugger
+FROM golang:1.25-bookworm AS build
+
+# Install Delve debugger
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+# Install build dependencies
+ARG TARGETARCH
+ARG TARGETOS
+
+RUN apt-get update && apt-get install -y clang llvm make \
+    && case "${TARGETARCH}" in \
+        "amd64") apt-get install -y linux-headers-amd64 || true ;; \
+        "arm64") apt-get install -y linux-headers-arm64 || true ;; \
+        "arm") apt-get install -y linux-headers-armmp || true ;; \
+        *) echo "Installing generic linux headers" && apt-get install -y linux-headers-generic || true ;; \
+    esac
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY eBPF/ eBPF/
+WORKDIR /src/eBPF
+RUN case "${TARGETARCH}" in \
+        "amd64") make TARGET_ARCH=x86 ;; \
+        "arm64") make TARGET_ARCH=arm64 ;; \
+        "arm") make TARGET_ARCH=arm ;; \
+        "riscv64") make TARGET_ARCH=riscv ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac
+
+WORKDIR /src
+COPY cmd/ cmd/
+COPY pkg/ pkg/
+COPY internal/ internal/
+
+# Build with debug symbols
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -gcflags="all=-N -l" -o /out/agent ./cmd/agent
+
+# Debug runtime image
+FROM gcr.io/distroless/base-debian12:debug
+
+WORKDIR /
+COPY --from=build /go/bin/dlv /dlv
+COPY --from=build /out/agent /agent
+COPY --from=build /src/eBPF/tcpconnect.bpf.o /bpf/tcpconnect.bpf.o
+
+# Run with Delve debugger
+USER 0
+EXPOSE 2345
+ENTRYPOINT ["/dlv", "exec", "/agent", "--headless", "--listen=:2345", "--api-version=2", "--accept-multiclient", "--continue"]

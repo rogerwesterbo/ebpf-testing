@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  ebpf-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ebpf-tcp-monitor
+    privileged: true
+    pid: host
+    network_mode: host
+    ports:
+      - '9090:9090'
+    environment:
+      - LOG_LEVEL=info
+    volumes:
+      # Mount host /proc for process name resolution
+      - /proc:/host/proc:ro
+    restart: unless-stopped
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.ebpf-monitor.rule=Host(`ebpf-monitor.localhost`)'
+      - 'traefik.http.services.ebpf-monitor.loadbalancer.server.port=9090'
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - '9091:9090'
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - '3000:3000'
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: ebpf-monitoring

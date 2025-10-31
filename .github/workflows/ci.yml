@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm make bpftool libbpf-dev linux-headers-$(uname -r)
+          sudo apt-get install -y clang llvm make libbpf-dev linux-headers-$(uname -r) linux-tools-common linux-tools-generic
 
       - name: Verify dependencies
         run: make deps
@@ -72,7 +72,7 @@ jobs:
       - name: Install cross-compilation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm make bpftool libbpf-dev
+          sudo apt-get install -y clang llvm make libbpf-dev linux-tools-common linux-tools-generic
           case "${{ matrix.arch }}" in
             "amd64") sudo apt-get install -y linux-headers-amd64 || true ;;
             "arm64") sudo apt-get install -y linux-headers-arm64 || true ;;

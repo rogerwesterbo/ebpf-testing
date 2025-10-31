@@ -70,10 +70,10 @@ func (c *Checker) GetStatus() Status {
 func (c *Checker) LivenessHandler(w http.ResponseWriter, r *http.Request) {
 	if c.IsAlive() {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Not alive"))
+		_, _ = w.Write([]byte("Not alive"))
 	}
 }
 
@@ -82,10 +82,10 @@ func (c *Checker) LivenessHandler(w http.ResponseWriter, r *http.Request) {
 func (c *Checker) ReadinessHandler(w http.ResponseWriter, r *http.Request) {
 	if c.IsReady() {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Ready"))
+		_, _ = w.Write([]byte("Ready"))
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("Not ready"))
+		_, _ = w.Write([]byte("Not ready"))
 	}
 }
 
@@ -100,5 +100,5 @@ func (c *Checker) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }

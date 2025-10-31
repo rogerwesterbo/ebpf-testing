@@ -28,7 +28,8 @@ type Manager struct {
 func NewManager(cfg Config) *Manager {
 	// Metrics server
 	metricsServer := &http.Server{
-		Addr: cfg.MetricsAddr,
+		Addr:              cfg.MetricsAddr,
+		ReadHeaderTimeout: 5 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/metrics" {
 				promhttp.Handler().ServeHTTP(w, r)
@@ -45,8 +46,9 @@ func NewManager(cfg Config) *Manager {
 	healthMux.HandleFunc("/health", cfg.HealthCheck.HealthHandler)
 
 	healthServer := &http.Server{
-		Addr:    cfg.HealthAddr,
-		Handler: healthMux,
+		Addr:              cfg.HealthAddr,
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           healthMux,
 	}
 
 	return &Manager{

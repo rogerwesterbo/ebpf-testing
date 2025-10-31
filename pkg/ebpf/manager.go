@@ -61,7 +61,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	// Get map handle
 	counts := coll.Maps[cfg.MapName]
 	if counts == nil {
-		l.Close()
+		_ = l.Close()
 		coll.Close()
 		return nil, fmt.Errorf("map %q not found", cfg.MapName)
 	}

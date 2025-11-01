@@ -80,6 +80,20 @@ $(LIBBPF_HEADERS):
 	@echo "libbpf headers downloaded successfully"
 
 $(BPF_OBJ): tcpconnect.bpf.c $(VMLINUX_H) $(LIBBPF_HEADERS)
+	@if ! clang --print-targets 2>/dev/null | grep -q '^  bpf$$'; then \
+		echo ""; \
+		echo "WARNING: clang does not have BPF target support on this system."; \
+		echo "This is expected on macOS. The eBPF program must be compiled on Linux."; \
+		echo ""; \
+		echo "To compile on Linux, you can:"; \
+		echo "  1. Use Docker: docker run --rm -v \$$(pwd):/src -w /src/eBPF ubuntu:22.04 bash -c 'apt update && apt install -y clang llvm make && make'"; \
+		echo "  2. Use the CI/CD pipeline to build"; \
+		echo "  3. Use a Linux VM or WSL"; \
+		echo ""; \
+		echo "Creating placeholder object file for local development..."; \
+		touch $(BPF_OBJ); \
+		exit 0; \
+	fi; \
 	clang -O2 -g -target bpf $(ARCH_DEFINES) -c $< -o $@ \
 		-I. -I./include
 

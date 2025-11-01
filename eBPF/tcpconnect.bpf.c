@@ -1,7 +1,18 @@
 // minimal CO-RE kprobe; counts tcp_connect per PID
-#include <vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <bpf/bpf_core_read.h>
+
+/* BPF map types */
+#ifndef BPF_MAP_TYPE_HASH
+#define BPF_MAP_TYPE_HASH 1
+#endif
+
+/* BPF map flags */
+#ifndef BPF_ANY
+#define BPF_ANY 0
+#endif
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -11,7 +22,7 @@ struct {
 } counts SEC(".maps");
 
 SEC("kprobe/tcp_connect")
-int BPF_KPROBE(on_tcp_connect, struct sock *sk) {
+int on_tcp_connect(struct pt_regs *ctx) {
   u32 pid = bpf_get_current_pid_tgid() >> 32;
   u64 init = 1, *val = bpf_map_lookup_elem(&counts, &pid);
   if (val) __sync_fetch_and_add(val, 1);

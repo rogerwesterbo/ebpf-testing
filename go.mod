@@ -3,7 +3,7 @@ module github.com/rogerwesterbo/ebpf-testing
 go 1.25.3
 
 require (
-	github.com/cilium/ebpf v0.19.0
+	github.com/cilium/ebpf v0.20.0
 	github.com/prometheus/client_golang v1.23.2
 )
 
